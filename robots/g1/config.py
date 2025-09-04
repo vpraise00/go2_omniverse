@@ -1,12 +1,16 @@
 
-import omni.isaac.orbit.sim as sim_utils
-from omni.isaac.orbit.actuators import ImplicitActuatorCfg
-from omni.isaac.orbit.assets.articulation import ArticulationCfg
+import os
+from pathlib import Path
+import isaaclab.sim as sim_utils
+from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.assets.articulation import ArticulationCfg
 
+_HERE = Path(__file__).parent
+_USD = (_HERE / "g1.usd").resolve().as_posix()
 
 G1_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path="/home/brimo/Desktop/g1/g1_t.usd",
+        usd_path=_USD,
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -18,7 +22,9 @@ G1_CFG = ArticulationCfg(
             max_depenetration_velocity=1.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=4
+            enabled_self_collisions=False, 
+            solver_position_iteration_count=4, 
+            solver_velocity_iteration_count=4
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(

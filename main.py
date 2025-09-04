@@ -22,8 +22,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-from omniverse_sim import run_sim
-
-
 if __name__ == "__main__":
+    from omniverse_sim import run_sim
     run_sim()

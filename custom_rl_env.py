@@ -22,78 +22,81 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
+import os
 import math
 import torch
 from dataclasses import MISSING
 from typing import Literal
-import argparse  
+from pathlib import Path
 
+# Isaac Lab 2.2 imports (renamed from Orbit)
+from isaaclab.envs import RLTaskEnvCfg
+from isaaclab.utils import configclass
 
-from omni.isaac.orbit.envs import RLTaskEnvCfg
-from omni.isaac.orbit.utils import configclass
+import isaaclab.sim as sim_utils
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.managers import (
+    EventTermCfg as EventTerm,
+    ObservationGroupCfg as ObsGroup,
+    ObservationTermCfg as ObsTerm,
+    RewardTermCfg as RewTerm,
+    SceneEntityCfg,
+    TerminationTermCfg as DoneTerm,
+)
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+import isaaclab_tasks.locomotion.velocity.mdp as mdp
 
-import omni.isaac.orbit.sim as sim_utils
-from omni.isaac.orbit.assets import ArticulationCfg, AssetBaseCfg
-from omni.isaac.orbit.scene import InteractiveSceneCfg
-from omni.isaac.orbit.sensors import ContactSensorCfg, RayCasterCfg, patterns
-from omni.isaac.orbit.terrains import TerrainImporterCfg
-from omni.isaac.orbit.utils import configclass
-from omni.isaac.orbit_assets.unitree import UNITREE_GO2_CFG 
-from omni.isaac.orbit.managers import EventTermCfg as EventTerm
-from omni.isaac.orbit.managers import ObservationGroupCfg as ObsGroup
-from omni.isaac.orbit.managers import ObservationTermCfg as ObsTerm
-from omni.isaac.orbit.managers import RewardTermCfg as RewTerm
-from omni.isaac.orbit.managers import SceneEntityCfg
-from omni.isaac.orbit.managers import TerminationTermCfg as DoneTerm
-from omni.isaac.orbit.utils import configclass
-from omni.isaac.orbit.utils.noise import AdditiveUniformNoiseCfg as Unoise
-import omni.isaac.orbit_tasks.locomotion.velocity.mdp as mdp
+# Assets: handle both layouts
+try:
+    from isaaclab_assets.unitree import UNITREE_GO2_CFG
+except ImportError:
+    from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG
 
-from terrain_cfg import ROUGH_TERRAINS_CFG
+# Prefer Isaac Lab's built-in rough terrain config
+try:
+    from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
+except ImportError:
+    from isaaclab.terrains.config import ROUGH_TERRAINS_CFG
+
 from robots.g1.config import G1_CFG
 
-from omniverse_sim import args_cli
+
+# Do NOT import omniverse_sim here to avoid "modules loaded before SimulationApp"
+_base_command: dict[str, list[float]] = {}
 
 
-base_command = {}
-
-
-def constant_commands(env: RLTaskEnvCfg) -> torch.Tensor:
-    global base_command
-    """The generated command from the command generator."""
-    tensor_lst = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32, device=env.device).repeat(env.num_envs, 1)
+def constant_commands(env) -> torch.Tensor:
+    if not _base_command:
+        return torch.zeros((env.num_envs, 3), dtype=torch.float32, device=env.device)
+    out = torch.zeros((env.num_envs, 3), dtype=torch.float32, device=env.device)
     for i in range(env.num_envs):
-        tensor_lst[i] = torch.tensor(base_command[str(i)], dtype=torch.float32, device=env.device)
-    return tensor_lst
+        out[i] = torch.tensor(_base_command.get(str(i), [0.0, 0.0, 0.0]), dtype=torch.float32, device=env.device)
+    return out
 
 
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
-    """Configuration for the terrain scene with a legged robot."""
-
-    if args_cli.terrain == "flat":
-    
-        # flat terrain
-        terrain = TerrainImporterCfg(
-            prim_path="/World/ground",
-            terrain_type="plane",
-            debug_vis=False,
-        )
+    # Terrain selection via env var: TERRAIN=flat|rough (default rough)
+    _terrain_kind = os.getenv("TERRAIN", "rough").lower()
+    if _terrain_kind == "flat":
+        terrain = TerrainImporterCfg(prim_path="/World/ground", terrain_type="plane", debug_vis=False)
     else:
         terrain = TerrainImporterCfg(
-        prim_path="/World/ground",
-        terrain_type="generator",
-        terrain_generator=ROUGH_TERRAINS_CFG,
-        physics_material=sim_utils.RigidBodyMaterialCfg(
-        friction_combine_mode="multiply",
-        restitution_combine_mode="multiply",
-        static_friction=1.0,
-        dynamic_friction=1.0,
-        ),
-        debug_vis=False,
+            prim_path="/World/ground",
+            terrain_type="generator",
+            terrain_generator=ROUGH_TERRAINS_CFG,
+            physics_material=sim_utils.RigidBodyMaterialCfg(
+                friction_combine_mode="multiply",
+                restitution_combine_mode="multiply",
+                static_friction=1.0,
+                dynamic_friction=1.0,
+            ),
+            debug_vis=False,
         )
 
-    # robots
     robot: ArticulationCfg = MISSING
 
     height_scanner = RayCasterCfg(
@@ -106,13 +109,11 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
-    
-    # lights
+
     light = AssetBaseCfg(
         prim_path="/World/light",
         spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
     )
-
     sky_light = AssetBaseCfg(
         prim_path="/World/skyLight",
         spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),
@@ -187,7 +188,7 @@ class CommandsCfg:
         heading_control_stiffness=0.5,
         debug_vis=True,
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(0.0, 0.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0), heading=(0, 0)
+            lin_vel_x=(0.0, 0.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0), heading=(0.0, 0.0)
         ),
     )
 
@@ -196,14 +197,14 @@ class CommandsCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    # -- task
+    # task
     track_lin_vel_xy_exp = RewTerm(
         func=mdp.track_lin_vel_xy_exp, weight=1.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
     track_ang_vel_z_exp = RewTerm(
         func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
-    # -- penalties
+    # penalties
     lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
     dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
@@ -223,7 +224,7 @@ class RewardsCfg:
         weight=-1.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*THIGH"), "threshold": 1.0},
     )
-    # -- optional penalties
+    # optional penalties
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=0.0)
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
 
@@ -271,32 +272,28 @@ class LocomotionVelocityRoughEnvCfg(RLTaskEnvCfg):
     events: EventCfg = EventCfg()
 
     def __post_init__(self):
-        """Post initialization."""
-        # general settings
+        super().__post_init__()
         self.decimation = 4
         self.sim.render_interval = self.decimation
         self.episode_length_s = 20.0
-        # simulation settings
         self.sim.dt = 0.005
         self.sim.disable_contact_processing = True
         self.sim.physics_material = self.scene.terrain.physics_material
 
-        # update sensor update periods
-        # we tick all the sensors based on the smallest update period (physics update period)
+        # init constant commands to zeros to avoid KeyError
+        global _base_command
+        _base_command = {str(i): [0.0, 0.0, 0.0] for i in range(self.scene.num_envs)}
+
         if self.scene.height_scanner is not None:
             self.scene.height_scanner.update_period = self.decimation * self.sim.dt
-        
         if self.scene.contact_forces is not None:
             self.scene.contact_forces.update_period = self.sim.dt
-        
-        # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
-        # this generates terrains with increasing difficulty and is useful for training
-        if getattr(self.curriculum, "terrain_levels", None) is not None:
-            if self.scene.terrain.terrain_generator is not None:
-                self.scene.terrain.terrain_generator.curriculum = True
-        else:
-            if self.scene.terrain.terrain_generator is not None:
-                self.scene.terrain.terrain_generator.curriculum = False
+
+        gen = self.scene.terrain.terrain_generator
+        # Avoid AttributeError if self.curriculum is not defined
+        curr = getattr(self, "curriculum", None)
+        if gen is not None and curr is not None:
+            gen.curriculum = bool(getattr(curr, "terrain_levels", None))
 
 @configclass
 class UnitreeGo2CustomEnvCfg(LocomotionVelocityRoughEnvCfg):
@@ -326,17 +323,15 @@ class UnitreeGo2CustomEnvCfg(LocomotionVelocityRoughEnvCfg):
 @configclass
 class G1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     def __post_init__(self):
-        # post init of parent
         super().__post_init__()
-        # Scene
-        G1_MINIMAL_CFG = G1_CFG.copy()
-        G1_MINIMAL_CFG.spawn.usd_path = "./robots/g1/g1.usd"
-        self.scene.robot = G1_MINIMAL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        # Resolve USD path relative to this file, then normalize to forward slashes
+        usd_path = (Path(__file__).parent / "robots" / "g1" / "g1.usd").resolve().as_posix()
+
+        g1_cfg = G1_CFG.copy()
+        g1_cfg.spawn.usd_path = usd_path
+        self.scene.robot = g1_cfg.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/torso_link"
-        
-        # rewards
+
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = ".*_ankle_roll_link"
         self.rewards.undesired_contacts = None
-
-        # Terminations
         self.terminations.base_contact.params["sensor_cfg"].body_names = ["torso_link"]

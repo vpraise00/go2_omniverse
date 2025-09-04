@@ -41,11 +41,12 @@ from sensor_msgs_py import point_cloud2
 
 
 
-from omni.isaac.orbit.sensors import CameraCfg, Camera
+from isaaclab.sensors import CameraCfg, Camera
+import isaaclab.sim as sim_utils
 from omni.isaac.sensor import LidarRtx
 import omni.replicator.core as rep
 from scipy.spatial.transform import Rotation
-import omni.isaac.orbit.sim as sim_utils
+
 
 
 
