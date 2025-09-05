@@ -1,13 +1,14 @@
 """Play a trained checkpoint (RSL-RL) if available. No ROS2. Safe fallbacks."""
 from __future__ import annotations
 
-import argparse
 import os
-import sys
-import time
-import glob
 import re
+import glob
+import argparse
+import importlib
 import traceback
+import torch
+import gymnasium as gym
 
 def _locate_apps_dir() -> str | None:
     """Find IsaacLab/apps; prefer env var, else sibling 'IsaacLab/apps'."""
@@ -22,43 +23,6 @@ def _locate_apps_dir() -> str | None:
         return cand
     # 3) fallback: None
     return None
-
-def _resolve_experience_path(apps_dir: str | None, app_name: str, headless: bool) -> str | None:
-    """Map --app to the right .kit in apps_dir."""
-    name_map = {
-        "python": "isaaclab.python.kit",
-        "python.rendering": "isaaclab.python.rendering.kit",
-        "python.headless": "isaaclab.python.headless.kit",
-        "python.headless.rendering": "isaaclab.python.headless.rendering.kit",
-        "python.xr.openxr": "isaaclab.python.xr.openxr.kit",
-        "python.xr.openxr.headless": "isaaclab.python.xr.openxr.headless.kit",
-    }
-    # default if user didn’t pass --app
-    if app_name is None:
-        app_name = "python.headless" if headless else "python"
-    kit_file = name_map.get(app_name)
-    if not kit_file or not apps_dir:
-        return None
-    kit_path = os.path.join(apps_dir, kit_file)
-    return kit_path if os.path.isfile(kit_path) else None
-
-def _get_sim_app(headless: bool, app_name: str | None = None):
-    """Return SimulationApp for Isaac Sim 5.x or 2023.x (fallback) with Isaac Lab app experience on Windows."""
-    # Try Isaac Sim 5.x
-    try:
-        from isaacsim import SimulationApp  # type: ignore
-        apps_dir = _locate_apps_dir()
-        exp = _resolve_experience_path(apps_dir, app_name, headless)
-        if exp:
-            print(f"[INFO] Using Isaac Lab experience: {exp}")
-            return SimulationApp({"headless": headless, "experience": exp})
-        # Fallback to default experience if not found
-        print("[WARN] Isaac Lab apps dir or .kit not found; using default experience.")
-        return SimulationApp({"headless": headless})
-    except Exception:
-        # Legacy Isaac Sim 2023.x
-        from omni.isaac.kit import SimulationApp  # type: ignore
-        return SimulationApp({"headless": headless})
 
 def _ensure_exp_path_env():
     """Ensure EXP_PATH is set for AppLauncher to resolve experience files."""
@@ -174,7 +138,7 @@ def run_sim(argv=None):
     from isaaclab.app import AppLauncher
 
     args = parse_args(argv)
-    # Isaac Lab AppLauncher로 SimulationApp 시작 (경험 파일/렌더링 모드 자동 선택)
+    # Start SimulationApp with Isaac Lab AppLauncher (autonomous selection of experience file/rendering mode)
     print("[INFO] Launching Isaac Sim via Isaac Lab AppLauncher ...")
     app_launcher = AppLauncher(args)
     simulation_app = app_launcher.app
@@ -182,81 +146,115 @@ def run_sim(argv=None):
     # Try full RL playback path (requires your env + rsl_rl). On failure, fallback to smoke.
     try:
         _ensure_lab_registry()
-        import torch  # type: ignore
         from rsl_rl.runners import OnPolicyRunner  # type: ignore
 
         env = None
-        # create env via Isaac Lab 2.2 registry
-        if args.task.startswith("Isaac-"):
-            import gymnasium as gym
+
+        # Prefer robot-specific creation to avoid mismatched dims
+        if args.robot == "g1":
+            gym_id = "Isaac-Velocity-Rough-Unitree-G1-v0"
+            print(f"[INFO] Creating gym env: {gym_id} (num_envs={args.robot_amount})")
+            try:
+                sim_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+                try:
+                    from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
+                    env_cfg = parse_env_cfg(gym_id, device=sim_device, num_envs=args.robot_amount)
+                    env = gym.make(gym_id, cfg=env_cfg)
+                except Exception as e_cfg:
+                    print(f"[WARN] parse_env_cfg failed for G1 ({e_cfg}). Falling back to manual ctor.")
+            except Exception as e:
+                print(f"[WARN] Gym registry for G1 failed: {e}. Falling back to manual ctor.")
+
+            if env is None:
+                # Manual ctor with G1 cfg
+                from isaaclab.envs import ManagerBasedRLEnv
+                try:
+                    from isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg import G1RoughEnvCfg
+                except Exception:
+                    raise RuntimeError("G1RoughEnvCfg import failed; ensure isaaclab_tasks is installed.")
+                cfg = G1RoughEnvCfg()
+                cfg.scene.num_envs = args.robot_amount
+                print(f"[INFO] Creating manual G1 env (num_envs={args.robot_amount})")
+                env = ManagerBasedRLEnv(cfg)
+            # default experiment name for checkpoint search
+            exp_name_default = "g1_rough"
+
+        elif args.task.startswith("Isaac-"):
             print(f"[INFO] Creating gym env: {args.task} (num_envs={args.robot_amount})")
             try:
-                env = gym.make(args.task, num_envs=args.robot_amount)
+                # Prefer cfg-based construction
+                sim_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+                try:
+                    from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
+                    env_cfg = parse_env_cfg(args.task, device=sim_device, num_envs=args.robot_amount)
+                    env = gym.make(args.task, cfg=env_cfg)
+                except Exception as e_cfg:
+                    print(f"[WARN] parse_env_cfg failed ({e_cfg}). Falling back to num_envs kwarg.")
+                    env = gym.make(args.task, num_envs=args.robot_amount)
             except Exception as e:
                 print(f"[WARN] Gym registry failed: {e}. Falling back to manual ctor.")
 
         if env is None:
-            # Manual ctor with Isaac Lab cfg
+            # Manual ctor for Go2 (or fallback when gym failed)
             from isaaclab.envs import ManagerBasedRLEnv
             if args.robot == "g1":
                 try:
                     from isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg import G1RoughEnvCfg
                 except Exception:
-                    from isaaclab_tasks.manager_based.locomotion.velocity.config.unitree.g1.rough_env_cfg import G1RoughEnvCfg  # type: ignore
+                    raise RuntimeError("G1RoughEnvCfg import failed; ensure isaaclab_tasks is installed.")
                 cfg = G1RoughEnvCfg()
                 exp_name_default = "g1_rough"
-            else:
+            elif args.robot == "go2":
                 try:
                     from isaaclab_tasks.manager_based.locomotion.velocity.config.go2.rough_env_cfg import UnitreeGo2RoughEnvCfg
                 except Exception:
-                    from isaaclab_tasks.manager_based.locomotion.velocity.config.unitree.go2.rough_env_cfg import UnitreeGo2RoughEnvCfg  # type: ignore
+                    raise RuntimeError("UnitreeGo2RoughEnvCfg import failed; ensure isaaclab_tasks is installed.")
                 cfg = UnitreeGo2RoughEnvCfg()
                 exp_name_default = "unitree_go2_rough"
+            else:
+                raise NotImplementedError(f"Unknown robot type: {args.robot}")
 
             cfg.scene.num_envs = args.robot_amount
             print(f"[INFO] Creating manual env (robot={args.robot}, num_envs={args.robot_amount})")
-            base_env = ManagerBasedRLEnv(cfg)
+            env = ManagerBasedRLEnv(cfg)
 
-            # Wrap with RSL-RL vectorized wrapper to provide get_observations API
-            try:
-                from isaaclab_tasks.utils.wrappers.rsl_rl import RslRlVecEnvWrapper
-                env = RslRlVecEnvWrapper(base_env)
-                print("[INFO] Wrapped env with RslRlVecEnvWrapper.")
-            except Exception as e:
-                print(f"[WARN] Failed to wrap env for RSL-RL ({e}). Using base env; some runners may not work.")
-                env = base_env
-
-        # # Build env config
-        # env_cfg = EnvCfg()
-        # # Best-effort: set number of envs if attribute path exists
-        # try:
-        #     env_cfg.scene.num_envs = args.robot_amount  # type: ignore[attr-defined]
-        # except Exception:
-        #     pass
-
-        # # Create env via gym registry (must be registered elsewhere)
-        # print(f"[INFO] Creating gym env: {args.task}")
-        # try:
-        #     env = gym.make(args.task, cfg=env_cfg)
-        # except Exception as e:
-        #     print(f"[WARN] gym.make failed for '{args.task}': {e}")
-        #     raise
-
-        # If you had a VecEnv wrapper in Orbit, skip unless available in your setup.
-        # from omni.isaac.orbit_tasks.utils.wrappers.rsl_rl import RslRlVecEnvWrapper
-        # env = RslRlVecEnvWrapper(env)
+        # --- Always wrap for RSL-RL ---
+        from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
+        env = RslRlVecEnvWrapper(env)
+        print("[INFO] Wrapped env with isaaclab_rl.rsl_rl.RslRlVecEnvWrapper.")
 
         # Agent cfg + checkpoint
         from agent_cfg import unitree_go2_agent_cfg, unitree_g1_agent_cfg
         agent_cfg = dict(unitree_g1_agent_cfg if args.robot == "g1" else unitree_go2_agent_cfg)
-        exp_name = args.experiment_name or (exp_name_default if 'exp_name_default' in locals() else
-                                            ("g1_rough" if args.robot == "g1" else "unitree_go2_rough"))
+        exp_name = args.experiment_name or (exp_name_default if 'exp_name_default' in locals()
+                                            else ("g1_rough" if args.robot == "g1" else "unitree_go2_rough"))
         ckpt_path = _find_checkpoint(exp_name, load_run=args.load_run, load_checkpoint=args.load_checkpoint)
         if not ckpt_path:
             raise RuntimeError("checkpoint_missing")
 
+        # Sanity check: compare env dims vs checkpoint dims
+        env_num_obs = getattr(env, "num_obs", None) or (env.observation_space.shape[0] if hasattr(env, "observation_space") else None)
+        env_num_actions = getattr(env, "num_actions", None) or (env.action_space.shape[0] if hasattr(env, "action_space") else None)
+        try:
+            ckpt_blob = torch.load(ckpt_path, map_location="cpu")
+            msd = ckpt_blob.get("model_state_dict", {})
+            ckpt_num_actions = int(msd["std"].shape[0]) if "std" in msd else None
+            ckpt_num_obs = int(msd["actor.0.weight"].shape[1]) if "actor.0.weight" in msd else None
+            print(f"[INFO] Env dims: obs={env_num_obs}, act={env_num_actions} | Checkpoint dims: obs={ckpt_num_obs}, act={ckpt_num_actions}")
+            if (ckpt_num_obs and env_num_obs and ckpt_num_obs != env_num_obs) or \
+               (ckpt_num_actions and env_num_actions and ckpt_num_actions != env_num_actions):
+                raise RuntimeError(
+                    f"Checkpoint/env dimension mismatch. "
+                    f"Env(obs={env_num_obs}, act={env_num_actions}) vs Ckpt(obs={ckpt_num_obs}, act={ckpt_num_actions}). "
+                    f"Run with matching robot/task/config or pick the corresponding checkpoint."
+                )
+        except Exception as _e:
+            # Non-fatal; OnPolicyRunner.load will still give a detailed error if incompatible
+            print(f"[WARN] Pre-flight checkpoint shape check: {_e}")
+
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         print(f"[INFO] Loading checkpoint: {ckpt_path} (device={device})")
+        from rsl_rl.runners import OnPolicyRunner  # type: ignore
         runner = OnPolicyRunner(env, agent_cfg, log_dir=None, device=device)
         runner.load(ckpt_path)
         policy = runner.get_inference_policy(device=getattr(env, "device", device))
@@ -266,7 +264,6 @@ def run_sim(argv=None):
         try:
             obs, _ = env.get_observations()
         except Exception:
-            # Generic reset fallback
             obs, _ = env.reset()
 
         print("[INFO] Starting inference loop...")
@@ -274,11 +271,7 @@ def run_sim(argv=None):
             with torch.inference_mode():
                 actions = policy(obs)
                 step_out = env.step(actions)
-                # Support both (obs, ...) or plain obs
-                if isinstance(step_out, tuple) and len(step_out) > 0:
-                    obs = step_out[0]
-                else:
-                    obs = step_out
+                obs = step_out[0] if isinstance(step_out, tuple) and len(step_out) > 0 else step_out
 
         try:
             env.close()
