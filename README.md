@@ -3,9 +3,11 @@
 
 # Welcome to the Unitree Go2/G1 Digital Twins Project!
 
-[![IsaacSim](https://img.shields.io/badge/IsaacSim-orbit-gold.svg)](https://docs.omniverse.nvidia.com/isaacsim/latest/overview.html)
-[![Python](https://img.shields.io/badge/python-3.10-blue.svg)](https://docs.python.org/3/whatsnew/3.10.html)
+[![IsaacSim](https://img.shields.io/badge/IsaacSim-5.0.0-gold.svg)](https://docs.omniverse.nvidia.com/isaacsim/latest/overview.html)
+[![IsaacLab](https://img.shields.io/badge/IsaacLab-2.2.1-purple.svg)](https://isaac-sim.github.io/IsaacLab/main/index.html)
+[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://docs.python.org/3/whatsnew/3.11.html)
 [![Linux platform](https://img.shields.io/badge/platform-linux--64-orange.svg)](https://releases.ubuntu.com/22.04/)
+[![Windows 11 platform](https://img.shields.io/badge/platform-windows--11-green.svg)](https://www.microsoft.com/ko-kr/software-download/windows11)
 [![License](https://img.shields.io/badge/license-BSD--2-yellow.svg)](https://opensource.org/licenses/BSD-2-Clause)
 
 We are thrilled to announce that the Unitree Go2/G1 robot has now been integrated with the Nvidia Isaac Sim (Orbit), marking a major step forward in robotics research and development. The combination of these two cutting-edge technologies opens up a world of possibilities for creating and testing algorithms in a variety of simulated environments.
@@ -88,6 +90,7 @@ Get ready to take your research to the next level with this powerful new resourc
 10. Bunch of RL-envs for custom dog training :white_check_mark:
 11. Custom numbers of robots :white_check_mark:
 12. Added G1 Unitree support :white_check_mark:
+13. Port to Recent Isaac Sim and Isaac Lab :white_check_mark:
 
 ## Your feedback and support mean the world to us. 
 
@@ -108,32 +111,31 @@ If you would like to get more detailed information about Robolaunch web platform
 
 ## System requirements and installation
 Whether you're running locally or in the cloud, you'll need to install:
-1. Ubuntu 22.04
-2. Nvidia Isaac Sim 2023.1.1
-3. Nvidia Orbit 0.3.0
+1. Ubuntu 22.04 or Window 11(ROS2 Humble are not supported)
+2. Nvidia Isaac Sim 5.0.0
+3. Nvidia Isaac Lab 2.2.1
 4. Ros2 Humble
 
 Full instruction:
 ```
-After installation of Nvidia Isaac Sim 2023.1.1 and Ros2 Humble:
+After installation of Nvidia Isaac Sim 5.0.0 and Ros2 Humble:
 
-1. Clone this specific IsaacLab repo version: https://github.com/isaac-sim/IsaacLab/releases/tag/v0.3.1
+1. Clone this specific IsaacLab repo version: https://github.com/isaac-sim/IsaacLab/releases/tag/v2.2.1
 2. Execute in ubuntu terminal:
-export ISAACSIM_PATH="${HOME}/.local/share/ov/pkg/isaac-sim-2023.1.1"
+export ISAACSIM_PATH="${HOME}/.local/share/ov/pkg/isaac-sim-5.0.0"
 export ISAACSIM_PYTHON_EXE="${ISAACSIM_PATH}/python.sh"
 and also put it inside .bashrc file
-3. Inside the root folder of Orbit repo (https://github.com/isaac-sim/IsaacLab/releases/tag/v0.3.1) execute ln -s ${ISAACSIM_PATH} _isaac_sim
-4. Execute ./orbit.sh --conda
-5. Execute conda activate orbit
+3. Inside the root folder of Isaac Lab repo (https://github.com/isaac-sim/IsaacLab/releases/tag/v2.2.1) execute ln -s ${ISAACSIM_PATH} _isaac_sim
+4. Execute ./isaaclab.sh --conda
+5. Execute conda activate env_isaaclab
 6. Execute sudo apt install cmake build-essential
-7. Execute ./orbit.sh --install
-8. Execute ./orbit.sh --extra rsl_rl
-9. Verify the installation using "python source/standalone/tutorials/00_sim/create_empty.py" You should be inside conda env.
-10. You need to check that you have "Isaac Sim Python 2023.1.1 - New Stage*" on the top of the window.
-11. Clone this repo with git clone https://github.com/abizovnuralem/go2_omniverse/ --recurse-submodules -j8 --depth=1
-12. Copy the config file Unitree_L1.json (located in go2_omniverse/Isaac_sim/Unitree/Unitree_L1.json) for the Unitree L1 LiDAR to the folder IsaacLab-0.3.1/source/data/sensors/lidar/Unitree_L1.json (if the path doesnt exists, create it)
-13. Copy all material files in the isaac-sim-2023.1.1/data/material_files folder to IsaacLab_v0.3.1/source/data/material_files (if the path doesnt exists, create it)
-14. Execute ./run_sim.sh (without activated conda orbit env)
+7. Execute ./isaaclab.sh --install
+8. Verify the installation using "python source/standalone/tutorials/00_sim/create_empty.py" You should be inside conda env.
+9. You need to check that you have "Isaac Sim Python 2023.1.1 - New Stage*" on the top of the window.
+10. Clone this repo with git clone https://github.com/abizovnuralem/go2_omniverse/ --recurse-submodules -j8 --depth=1
+11. Copy the config file Unitree_L1.json (located in go2_omniverse/Isaac_sim/Unitree/Unitree_L1.json) for the Unitree L1 LiDAR to the folder IsaacLab-0.3.1/source/data/sensors/lidar/Unitree_L1.json (if the path doesnt exists, create it)
+12. Copy all material files in the isaac-sim-2023.1.1/data/material_files folder to IsaacLab_v0.3.1/source/data/material_files (if the path doesnt exists, create it)
+13. Execute ./run_sim.sh (without activated conda env_isaaclab)
 ```
 
 Some suggestions:
@@ -147,17 +149,26 @@ https://docs.omniverse.nvidia.com/isaacsim/latest/installation/install_ros.html#
 ```
 
 ## Usage
-The current project was tested on Ubuntu 22.04, IsaacSim 2023.1.1 with Orbit 0.3.0 and Nvidia Driver Version: 545.
+The current project was tested on Windows 11, IsaacSim 5.0.0 with IsaacLab 2.2.1 and Nvidia Driver Version: 577.
 To start the project with Unitree GO2, execute:
 
 ```
 ./run_sim.sh
 ```
 
+In Windows
+```
+run_sim.bat
+```
 To start the project with Unitree G1, execute:
 
 ```
 ./run_sim_g1.sh
+```
+
+In Windows
+```
+run_sim.bat --robot g1
 ```
 
 You can control the dog using "WASD" keyboard commands
@@ -177,7 +188,7 @@ Then you can execute it modifying run_sim.sh script with --custom_env=office and
 
 To contribute or modify the project, refer to these resources for implementing additional features or improving the existing codebase. PRs are welcome!
 
-## VR support
+## VR support (Not yet tested in ported version.)
 
 To enable VR support on linux will take some time, but it works!
 I have tested it on:
