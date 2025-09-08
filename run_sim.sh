@@ -25,55 +25,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Move to this script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Environment for Isaac Sim/Isaac Lab
 export OMNI_KIT_ACCEPT_EULA=1
 export OMNI_KIT_FAST_SHUTDOWN=1
 
-# Allow user override; otherwise try a few common locations
 if [[ -z "${ISAACLAB_APPS_DIR:-}" ]]; then
-  CANDIDATES=(
-    "$SCRIPT_DIR/../IsaacLab/apps"
-    "$SCRIPT_DIR/../../IsaacLab/apps"
-    "$HOME/IsaacLab/apps"
-  )
-  for cand in "${CANDIDATES[@]}"; do
-    if [[ -d "$cand" ]]; then
-      export ISAACLAB_APPS_DIR="$cand"
-      break
-    fi
-  done
-  if [[ -z "${ISAACLAB_APPS_DIR:-}" ]]; then
-    echo "[WARN] ISAACLAB_APPS_DIR is not set and could not be auto-detected. If AppLauncher needs it, set it before running:"
-    echo "       export ISAACLAB_APPS_DIR=/path/to/IsaacLab/apps"
-  fi
+  CANDIDATES=("$SCRIPT_DIR/../IsaacLab/apps" "$SCRIPT_DIR/../../IsaacLab/apps" "$HOME/IsaacLab/apps")
+  for cand in "${CANDIDATES[@]}"; do [[ -d "$cand" ]] && export ISAACLAB_APPS_DIR="$cand" && break; done
 fi
 
-# Pick Python executable
-if [[ -n "${ISAACSIM_PYTHON_EXE:-}" ]]; then
-  PYEXE="$ISAACSIM_PYTHON_EXE"
-elif command -v python3 >/dev/null 2>&1; then
-  PYEXE="python3"
-elif command -v python >/dev/null 2>&1; then
-  PYEXE="python"
-else
-  echo "[ERROR] Neither python3 nor python found, and ISAACSIM_PYTHON_EXE not set."
-  exit 1
-fi
+if [[ -n "${ISAACSIM_PYTHON_EXE:-}" ]]; then PYEXE="$ISAACSIM_PYTHON_EXE"
+elif command -v python3 >/dev/null 2>&1; then PYEXE="python3"
+elif command -v python >/dev/null 2>&1; then PYEXE="python"
+else echo "[ERROR] python not found"; exit 1; fi
 
-# Args: default like .bat when none provided
 if [[ "$#" -eq 0 ]]; then
-  ARGS=(--robot go2 --robot_amount 1 --app python)
+  # switched to --num_envs
+  ARGS=(--robot go2 --num_envs 1 --app python)
 else
   ARGS=("$@")
 fi
 
 echo "[INFO] Python: $PYEXE"
 echo "[INFO] Args: ${ARGS[*]}"
-
-# Run
 "$PYEXE" main.py "${ARGS[@]}"
-exit $?

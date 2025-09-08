@@ -30,7 +30,7 @@ from typing import Literal
 from pathlib import Path
 
 # Isaac Lab 2.2 imports (renamed from Orbit)
-from isaaclab.envs import RLTaskEnvCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.utils import configclass
 
 import isaaclab.sim as sim_utils
@@ -47,7 +47,7 @@ from isaaclab.managers import (
     TerminationTermCfg as DoneTerm,
 )
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
-import isaaclab_tasks.locomotion.velocity.mdp as mdp
+import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 # Assets: handle both layouts
 try:
@@ -67,6 +67,7 @@ from robots.g1.config import G1_CFG
 # Do NOT import omniverse_sim here to avoid "modules loaded before SimulationApp"
 _base_command: dict[str, list[float]] = {}
 
+TERRAIN_KIND = os.getenv("TERRAIN", "rough").lower()
 
 def constant_commands(env) -> torch.Tensor:
     if not _base_command:
@@ -76,13 +77,14 @@ def constant_commands(env) -> torch.Tensor:
         out[i] = torch.tensor(_base_command.get(str(i), [0.0, 0.0, 0.0]), dtype=torch.float32, device=env.device)
     return out
 
-
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
     # Terrain selection via env var: TERRAIN=flat|rough (default rough)
-    _terrain_kind = os.getenv("TERRAIN", "rough").lower()
-    if _terrain_kind == "flat":
-        terrain = TerrainImporterCfg(prim_path="/World/ground", terrain_type="plane", debug_vis=False)
+    if TERRAIN_KIND == "flat":
+        terrain = TerrainImporterCfg(
+            prim_path="/World/ground", 
+            terrain_type="plane", 
+            debug_vis=False)
     else:
         terrain = TerrainImporterCfg(
             prim_path="/World/ground",
@@ -257,7 +259,7 @@ class EventCfg:
 
 
 @configclass
-class LocomotionVelocityRoughEnvCfg(RLTaskEnvCfg):
+class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
     # Scene settings
     scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=2.5)

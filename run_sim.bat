@@ -9,7 +9,8 @@ set "ISAACLAB_APPS_DIR=D:\My_Project\Sim\IsaacLab\apps"
 if defined ISAACSIM_PYTHON_EXE (set "PYEXE=%ISAACSIM_PYTHON_EXE%") else (set "PYEXE=python")
 
 if "%~1"=="" (
-  set "ARGS=--robot go2 --robot_amount 1 --app python"
+  rem switched to --num_envs
+  set "ARGS=--robot go2 --num_envs 1 --app python"
 ) else (
   set "ARGS=%*"
 )

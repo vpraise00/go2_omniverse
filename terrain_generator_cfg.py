@@ -5,7 +5,7 @@
 
 """
 Configuration classes defining the different terrains available. Each configuration class must
-inherit from ``omni.isaac.orbit.terrains.terrains_cfg.TerrainConfig`` and define the following attributes:
+inherit from ``isaaclab.terrains.terrains_cfg.TerrainConfig`` and define the following attributes:
 
 - ``name``: Name of the terrain. This is used for the prim name in the USD stage.
 - ``function``: Function to generate the terrain. This function must take as input the terrain difficulty
@@ -21,7 +21,7 @@ from dataclasses import MISSING
 from typing import Literal
 
 from isaaclab.utils import configclass
-
+from isaaclab.terrains.terrain_generator import TerrainGenerator
 
 @configclass
 class FlatPatchSamplingCfg:
@@ -104,9 +104,21 @@ class SubTerrainBaseCfg:
 class TerrainGeneratorCfg:
     """Configuration for the terrain generator."""
 
+    class_type: type = TerrainGenerator
+    """The class to use for the terrain generator.
+
+    Defaults to :class:`isaaclab.terrains.terrain_generator.TerrainGenerator`.
+    """
+
     seed: int | None = None
-    """The seed for the random number generator. Defaults to None,
-    in which case the seed is not set."""
+    """The seed for the random number generator. Defaults to None, in which case the seed from the
+    current NumPy's random state is used.
+
+    When the seed is set, the random number generator is initialized with the given seed. This ensures
+    that the generated terrains are deterministic across different runs. If the seed is not set, the
+    seed from the current NumPy's random state is used. This assumes that the seed is set elsewhere in
+    the code.
+    """
 
     curriculum: bool = False
     """Whether to use the curriculum mode. Defaults to False.
@@ -124,6 +136,13 @@ class TerrainGeneratorCfg:
 
     border_width: float = 0.0
     """The width of the border around the terrain (in m). Defaults to 0.0."""
+
+    border_height: float = 1.0
+    """The height of the border around the terrain (in m). Defaults to 1.0.
+
+    .. note::
+      The default border extends below the ground. If you want to make the border above the ground, choose a negative value.
+    """
 
     num_rows: int = 1
     """Number of rows of sub-terrains to generate. Defaults to 1."""
@@ -176,7 +195,12 @@ class TerrainGeneratorCfg:
     """
 
     use_cache: bool = False
-    """Whether to load the terrain from cache if it exists. Defaults to True."""
+    """Whether to load the sub-terrain from cache if it exists. Defaults to False.
 
-    cache_dir: str = "/tmp/orbit/terrains"
-    """The directory where the terrain cache is stored. Defaults to "/tmp/orbit/terrains"."""
+    If enabled, the generated terrains are stored in the cache directory. When generating terrains, the cache
+    is checked to see if the terrain already exists. If it does, the terrain is loaded from the cache. Otherwise,
+    the terrain is generated and stored in the cache. Caching can be used to speed up terrain generation.
+    """
+
+    cache_dir: str = "/tmp/isaaclab/terrains"
+    """The directory where the terrain cache is stored. Defaults to "/tmp/isaaclab/terrains"."""
